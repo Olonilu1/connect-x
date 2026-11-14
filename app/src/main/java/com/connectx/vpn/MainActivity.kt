@@ -18,6 +18,12 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.appcompat.app.ActionBarDrawerToggle
+import androidx.appcompat.widget.Toolbar
+import androidx.drawerlayout.widget.DrawerLayout
+import com.google.android.material.navigation.NavigationView
+import java.net.URL
+import kotlin.concurrent.thread
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.ParseException
@@ -47,13 +53,29 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
         connectBtn = findViewById(R.id.connectBtn)
         disconnectBtn = findViewById(R.id.disconnectBtn)
-        val addBtn = findViewById<Button>(R.id.addProfileBtn)
-        val importBtn = findViewById<Button>(R.id.importBtn)
-
-        addBtn.setOnClickListener { showProfileDialog(null) }
-        importBtn.setOnClickListener { importNpvt() }
         connectBtn.setOnClickListener { startVpnFlow() }
         disconnectBtn.setOnClickListener { stopVpn() }
+        findViewById<View>(R.id.fabConnect).setOnClickListener { startVpnFlow() }
+
+        val toolbar = findViewById<Toolbar>(R.id.toolbar)
+        setSupportActionBar(toolbar)
+        val drawer = findViewById<DrawerLayout>(R.id.drawerLayout)
+        val toggle = ActionBarDrawerToggle(this, drawer, toolbar, 0, 0)
+        drawer.addDrawerListener(toggle)
+        toggle.syncState()
+
+        val nav = findViewById<NavigationView>(R.id.navView)
+        nav.setNavigationItemSelectedListener { item ->
+            drawer.closeDrawers()
+            when (item.itemId) {
+                R.id.menuImport -> importBtnCall()
+                R.id.menuAdd -> addBtnCall()
+                R.id.menuIp -> showMyIp()
+                R.id.menuAbout -> showAbout()
+                R.id.menuShare -> shareApp()
+            }
+            true
+        }
 
         ConnectXVpnService.stateCallback = { state ->
             runOnUiThread {
@@ -77,6 +99,39 @@ class MainActivity : AppCompatActivity() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIF_REQUEST_CODE)
         }
+    }
+
+    private fun importBtnCall() { importNpvt() }
+    private fun addBtnCall() { showProfileDialog(null) }
+
+    private fun showMyIp() {
+        thread {
+            val ip = try { URL("https://api.ipify.org").readText() } catch (e: Exception) { "" }
+            runOnUiThread {
+                AlertDialog.Builder(this)
+                    .setTitle("What's my IP")
+                    .setMessage(if (ip.isNotEmpty()) "Your public IP: $ip" else "Couldn't reach the IP service. Check your connection.")
+                    .setPositiveButton("OK", null)
+                    .show()
+            }
+        }
+    }
+
+    private fun showAbout() {
+        val vname = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (e: Exception) { "1.1" }
+        AlertDialog.Builder(this)
+            .setTitle("Connect X")
+            .setMessage("Connect X v$vname\nSSH-TLS-Payload, SlowDNS (dnstt) and plain SSH tunnel client with .npvt config import.")
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
+    private fun shareApp() {
+        val i = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, "Connect X VPN - https://github.com/Olonilu1/connect-x")
+        }
+        startActivity(Intent.createChooser(i, "Share Connect X"))
     }
 
     private fun prefs() = getSharedPreferences("connectx", MODE_PRIVATE)
@@ -121,8 +176,12 @@ class MainActivity : AppCompatActivity() {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                setPadding(0, 16, 0, 16)
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    setMargins(0, 12, 0, 12)
+                }
+                setBackgroundResource(R.drawable.profile_card)
+                setPadding(36, 36, 24, 36)
+                gravity = android.view.Gravity.CENTER_VERTICAL
             }
             val box = CheckBox(this).apply {
                 isChecked = p.optBoolean("selected", false)
@@ -132,6 +191,7 @@ class MainActivity : AppCompatActivity() {
             val label = TextView(this).apply {
                 val ssh = if (p.optString("sshUser").isNotEmpty()) "+ssh" else ""
                 text = "${p.optString("name")} $ssh${modeTag(p)}\n${if (p.optString("sshHost").isNotEmpty()) p.optString("sshHost") + ":" + p.optInt("sshPort", 22) else p.optString("tunnelDomain")}"
+                setTextColor(0xFFFFFFFF.toInt())
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             }
             val editBtn = Button(this).apply {
@@ -155,7 +215,8 @@ class MainActivity : AppCompatActivity() {
         if (profiles.isEmpty()) {
             val empty = TextView(this).apply {
                 text = "no profiles yet. add one or import a netmod .npvt config file."
-                setPadding(0, 16, 0, 16)
+                setTextColor(0xFF9AA8BB.toInt())
+                setPadding(8, 16, 8, 16)
             }
             profileList.addView(empty)
         }

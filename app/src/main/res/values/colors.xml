@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg_dark">#0e1420</color>
+    <color name="surface_dark">#1b2432</color>
+    <color name="surface_card">#202b3d</color>
+    <color name="toolbar_dark">#0a0f18</color>
+    <color name="accent_blue">#3d7bff</color>
+    <color name="accent_green">#43d17c</color>
+    <color name="accent_red">#ff5252</color>
+    <color name="text_primary">#ffffff</color>
+    <color name="text_secondary">#9aa8bb</color>
+    <color name="divider_dark">#2a3547</color>
+</resources>

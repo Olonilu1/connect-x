@@ -10,7 +10,7 @@
     <application
         android:label="Connect X"
         android:icon="@drawable/icon"
-        android:theme="@style/Theme.AppCompat.DayNight.NoActionBar"
+        android:theme="@style/Theme.ConnectX"
         android:allowBackup="true">
 
         <activity
