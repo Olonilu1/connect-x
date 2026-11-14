@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
-        android:label="Jayboy VPN"
+        android:label="Connect X"
         android:icon="@drawable/icon"
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar"
         android:allowBackup="true">
@@ -23,7 +23,7 @@
         </activity>
 
         <service
-            android:name=".JayboyVpnService"
+            android:name=".ConnectXVpnService"
             android:exported="false"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:foregroundServiceType="specialUse">

@@ -4,15 +4,15 @@ plugins {
 }
 
 android {
-    namespace = "com.jayboy.vpn"
+    namespace = "com.connectx.vpn"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.jayboy.vpn"
+        applicationId = "com.connectx.vpn"
         minSdk = 24
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.1"
+        versionCode = 1
+        versionName = "1.0"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 

@@ -1,4 +1,4 @@
-package com.jayboy.vpn
+package com.connectx.vpn
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -34,14 +34,14 @@ import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
 import mobile.Mobile
 
-class JayboyVpnService : VpnService() {
+class ConnectXVpnService : VpnService() {
 
     companion object {
-        const val TAG = "JayboyVpnService"
-        const val NOTIFICATION_CHANNEL_ID = "slowvpn_channel"
+        const val TAG = "ConnectXVpnService"
+        const val NOTIFICATION_CHANNEL_ID = "connectx_channel"
         const val NOTIFICATION_ID = 1
-        const val ACTION_CONNECT = "com.jayboy.vpn.CONNECT"
-        const val ACTION_DISCONNECT = "com.jayboy.vpn.DISCONNECT"
+        const val ACTION_CONNECT = "com.connectx.vpn.CONNECT"
+        const val ACTION_DISCONNECT = "com.connectx.vpn.DISCONNECT"
         const val EXTRA_TUNNELS = "tunnels_json"
         const val EXTRA_MTU = "mtu"
 
@@ -364,7 +364,7 @@ class JayboyVpnService : VpnService() {
             acquireWakeLock()
 
             val builder = Builder()
-                .setSession("Jayboy VPN")
+                .setSession("Connect X")
                 .addAddress("10.0.0.2", 32)
                 .addRoute("0.0.0.0", 0)
                 .addDnsServer(tunnels[0].dnsServer.substringBefore(":"))
@@ -661,7 +661,7 @@ class JayboyVpnService : VpnService() {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val disconnectIntent = PendingIntent.getService(this, 1,
-            Intent(this, JayboyVpnService::class.java).apply { action = ACTION_DISCONNECT },
+            Intent(this, ConnectXVpnService::class.java).apply { action = ACTION_DISCONNECT },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val label = if (tunnels.size > 1) "SlowDNS VPN (${tunnels.size} tunnels)" else "SlowDNS VPN"
         val (title, text, icon) = when (state) {
@@ -688,7 +688,7 @@ class JayboyVpnService : VpnService() {
     private fun acquireWakeLock() {
         if (wakeLock == null) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "JayboyVpnService::WakeLock")
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ConnectXVpnService::WakeLock")
         }
         wakeLock?.let { if (!it.isHeld) it.acquire() }
     }

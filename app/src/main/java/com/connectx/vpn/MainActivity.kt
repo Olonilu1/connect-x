@@ -1,4 +1,4 @@
-package com.jayboy.vpn
+package com.connectx.vpn
 
 import android.Manifest
 import android.content.Intent
@@ -55,7 +55,7 @@ class MainActivity : AppCompatActivity() {
         connectBtn.setOnClickListener { startVpnFlow() }
         disconnectBtn.setOnClickListener { stopVpn() }
 
-        JayboyVpnService.stateCallback = { state ->
+        ConnectXVpnService.stateCallback = { state ->
             runOnUiThread {
                 statusText.text = when {
                     state == "connecting" -> "connecting..."
@@ -79,7 +79,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun prefs() = getSharedPreferences("jayboyvpn", MODE_PRIVATE)
+    private fun prefs() = getSharedPreferences("connectx", MODE_PRIVATE)
 
     private fun loadProfiles() {
         profiles.clear()
@@ -359,10 +359,10 @@ class MainActivity : AppCompatActivity() {
     private var pendingMtu: Int = 1400
 
     private fun onVpnReady() {
-        val intent = Intent(this, JayboyVpnService::class.java).apply {
-            action = JayboyVpnService.ACTION_CONNECT
-            putExtra(JayboyVpnService.EXTRA_TUNNELS, pendingTunnelsJson)
-            putExtra(JayboyVpnService.EXTRA_MTU, pendingMtu)
+        val intent = Intent(this, ConnectXVpnService::class.java).apply {
+            action = ConnectXVpnService.ACTION_CONNECT
+            putExtra(ConnectXVpnService.EXTRA_TUNNELS, pendingTunnelsJson)
+            putExtra(ConnectXVpnService.EXTRA_MTU, pendingMtu)
         }
         ContextCompat.startForegroundService(this, intent)
     }
@@ -390,8 +390,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopVpn() {
-        val intent = Intent(this, JayboyVpnService::class.java).apply {
-            action = JayboyVpnService.ACTION_DISCONNECT
+        val intent = Intent(this, ConnectXVpnService::class.java).apply {
+            action = ConnectXVpnService.ACTION_DISCONNECT
         }
         startService(intent)
     }

@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "Jayboy VPN"
+rootProject.name = "Connect X"
 include(":app")

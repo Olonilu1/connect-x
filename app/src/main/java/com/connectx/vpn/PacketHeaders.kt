@@ -1,4 +1,4 @@
-package com.jayboy.vpn
+package com.connectx.vpn
 import java.net.InetAddress
 import java.nio.ByteBuffer
 

@@ -1,4 +1,4 @@
-package com.jayboy.vpn
+package com.connectx.vpn
 
 import android.util.Log
 import com.jcraft.jsch.ChannelDirectTCPIP
