@@ -364,6 +364,7 @@ class MainActivity : AppCompatActivity() {
             p.put("dnsServer", ssh.optString("dnsServer").trim().ifEmpty { "8.8.8.8" })
             p.put("tunnelDomain", nameserver)
             p.put("publicKey", pubkey)
+            p.put("udpgwPort", (ssh.optString("udpgwPort").trim().toIntOrNull() ?: 0).let { if (it in 1..65535) it else 0 })
             p.put("mtu", 1400)
             p.put("selected", false)
             p.put("mode", when {

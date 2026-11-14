@@ -61,9 +61,11 @@ class ConnectXVpnService : VpnService() {
         val sshPass: String = "",
         val sni: String = "",
         val payload: String = "",
-        val mode: String = "dnstt"
+        val mode: String = "dnstt",
+        val udpgwPort: Int = 0
     ) {
         var client: mobile.DnsttClient? = null
+        var udpGw: UdpGwClient? = null
         var restartFails = 0
         var sshSession: Session? = null
         var sshFails = 0
@@ -85,6 +87,10 @@ class ConnectXVpnService : VpnService() {
     private var synExecutor = Executors.newFixedThreadPool(16)
     private val handshakeSemaphore = Semaphore(3)
     private val roundRobin = AtomicInteger(0)
+    @Volatile private var vpnOut: FileOutputStream? = null
+    private val vpnOutLock = Any()
+    private val ipIdent = AtomicInteger(0)
+    private var udpExecutor: java.util.concurrent.ExecutorService? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         return when (intent?.action) {
@@ -125,7 +131,8 @@ class ConnectXVpnService : VpnService() {
                     sshPass = o.optString("sshPass"),
                     sni = o.optString("sni"),
                     payload = o.optString("payload"),
-                    mode = o.optString("mode").let { if (it in setOf("dnstt", "tls", "plain")) it else "dnstt" }
+                    mode = o.optString("mode").let { if (it in setOf("dnstt", "tls", "plain")) it else "dnstt" },
+                    udpgwPort = (o.optString("udpgwPort").toIntOrNull() ?: 0).let { if (it in 1..65535) it else 0 }
                 )
             }
         } catch (e: Exception) {
@@ -145,7 +152,7 @@ class ConnectXVpnService : VpnService() {
     /** Bring the SSH leg up inside a running dnstt tunnel (DNSTT+SSH mode). */
     private fun ensureSsh(t: Tunnel): Boolean {
         if (!t.usesSsh) return true
-        if (t.sshSession?.isConnected == true) return true
+        if (t.sshSession?.isConnected == true) { ensureUdpGw(t); return true }
         return try {
             val host = t.sshHost.ifEmpty { t.tunnelDomain.removePrefix("ns-") }
             val jsch = JSch()
@@ -163,6 +170,7 @@ class ConnectXVpnService : VpnService() {
             session.connect(60000)
             t.sshSession = session
             Log.d(TAG, "ssh up through tunnel ${t.port}")
+            ensureUdpGw(t)
             true
         } catch (e: Exception) {
             Log.e(TAG, "ssh connect failed through tunnel ${t.port}", e)
@@ -275,6 +283,83 @@ class ConnectXVpnService : VpnService() {
         false
     }
 
+    /** UDP gateway over the SSH leg (badvpn udpgw) so UDP apps get through the tunnel. */
+    private fun ensureUdpGw(t: Tunnel) {
+        if (!t.usesSsh || t.udpGw != null) return
+        val session = t.sshSession ?: return
+        val ports = if (t.udpgwPort > 0) listOf(t.udpgwPort) else listOf(7300, 446)
+        for (port in ports) {
+            try {
+                val channel = session.openChannel("direct-tcpip") as com.jcraft.jsch.ChannelDirectTCPIP
+                channel.setHost("127.0.0.1")
+                channel.setPort(port)
+                channel.connect(8000)
+                val gw = UdpGwClient(channel.inputStream, channel.outputStream)
+                gw.listener = object : UdpGwClient.Listener {
+                    override fun onPacket(localIp: InetAddress, localPort: Int, remoteIp: InetAddress, remotePort: Int, data: ByteArray) {
+                        try {
+                            val out = vpnOut ?: return
+                            val ident = ipIdent.updateAndGet { v -> if (v >= 0xffff) 0 else v + 1 }
+                            val udp = UDPHeader(remotePort, localPort, 8 + data.size, 0, data)
+                            val ip = IPv4Header(4, 5, 20 + 8 + data.size, ident, 0, 0, 64, 17, 0,
+                                remoteIp, localIp, udp.toByteArray(remoteIp, localIp))
+                            synchronized(vpnOutLock) { out.write(ip.toByteArrayForUdp()); out.flush() }
+                        } catch (e: Exception) { Log.e(TAG, "udpgw reply write failed", e) }
+                    }
+                    override fun onError(reason: String) { Log.e(TAG, "udpgw $port: $reason") }
+                }
+                gw.start()
+                t.udpGw = gw
+                Log.d(TAG, "udpgw up on 127.0.0.1:$port via ssh for ${t.name}")
+                return
+            } catch (e: Exception) {
+                Log.d(TAG, "udpgw port $port unavailable: ${e.message?.take(60)}")
+            }
+        }
+        Log.d(TAG, "no udpgw reachable for ${t.name}; UDP stays local")
+    }
+
+    /** Race a few well-known resolvers and keep the fastest one: dnstt throughput is
+     *  capped by the round-trip time to the resolver, so a fast resolver is a real speed-up. */
+    private fun pickResolver(t: Tunnel): String {
+        val candidates = linkedSetOf("1.1.1.1", "8.8.8.8", "9.9.9.9", t.dnsServer.substringBefore(":"))
+        var best = t.dnsServer.substringBefore(":")
+        var bestMs = Long.MAX_VALUE
+        val lock = Any()
+        val threads = candidates.map { cand ->
+            Thread {
+                var ms = Long.MAX_VALUE
+                try {
+                    val s = DatagramSocket()
+                    protect(s)
+                    s.soTimeout = 800
+                    val q = dnsProbeQuery()
+                    val start = System.currentTimeMillis()
+                    s.send(DatagramPacket(q, q.size, InetAddress.getByName(cand), 53))
+                    val buf = ByteArray(512)
+                    val resp = DatagramPacket(buf, buf.size)
+                    s.receive(resp)
+                    ms = System.currentTimeMillis() - start
+                    s.close()
+                } catch (e: Exception) { ms = Long.MAX_VALUE }
+                synchronized(lock) { if (ms < bestMs) { bestMs = ms; best = cand } }
+            }.apply { isDaemon = true }
+        }
+        threads.forEach { it.start() }
+        threads.forEach { it.join(1200) }
+        return best
+    }
+
+    private fun dnsProbeQuery(): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        out.write(byteArrayOf(0x4a, 0x4a, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00))
+        for (label in listOf("example", "com")) {
+            out.write(label.length); out.write(label.toByteArray(Charsets.US_ASCII))
+        }
+        out.write(0); out.write(byteArrayOf(0, 1, 0, 1))
+        return out.toByteArray()
+    }
+
     private fun startClient(t: Tunnel): Boolean {
         if (t.tunnelDomain.isEmpty() || t.publicKey.isEmpty()) return false
         try {
@@ -284,7 +369,9 @@ class ConnectXVpnService : VpnService() {
                 return false
             }
             Log.d(TAG, "starting dnstt client: dns=${t.dnsServer} domain=${t.tunnelDomain} port=${t.port}")
-            t.client = Mobile.newClient(t.dnsServer, t.tunnelDomain, t.publicKey, "127.0.0.1:${t.port}")
+            val resolver = pickResolver(t)
+            Log.d(TAG, "dnstt resolver for ${t.port}: $resolver")
+            t.client = Mobile.newClient(resolver, t.tunnelDomain, t.publicKey, "127.0.0.1:${t.port}")
             t.client?.start()
             Thread.sleep(150)
             val ok = t.client?.isRunning ?: false
@@ -306,6 +393,8 @@ class ConnectXVpnService : VpnService() {
             try { it.disconnect() } catch (_: Exception) {}
         }
         t.sshSession = null
+        t.udpGw?.let { try { it.stop() } catch (_: Exception) {} }
+        t.udpGw = null
     }
 
     private fun socksHandshakeOk(port: Int, timeoutMs: Int): Boolean {
@@ -381,6 +470,7 @@ class ConnectXVpnService : VpnService() {
             }
             Thread.sleep(500)
 
+            udpExecutor = Executors.newSingleThreadExecutor()
             var startedAny = false
             val live = mutableListOf<Tunnel>()
             for (t in tunnels) {
@@ -496,6 +586,7 @@ class ConnectXVpnService : VpnService() {
         val vpnFd = vpnInterface?.fileDescriptor ?: return
         val inputStream = FileInputStream(vpnFd)
         val outputStream = FileOutputStream(vpnFd)
+        vpnOut = outputStream
         val packet = ByteBuffer.allocate(32767)
         var lastCleanup = System.currentTimeMillis()
         try {
@@ -527,6 +618,7 @@ class ConnectXVpnService : VpnService() {
             if (shouldRun.get()) Log.e(TAG, "vpn loop error", e)
         } finally {
             try { inputStream.close(); outputStream.close() } catch (e: Exception) { }
+            synchronized(vpnOutLock) { vpnOut = null }
         }
     }
 
@@ -591,7 +683,19 @@ class ConnectXVpnService : VpnService() {
 
     private fun processUdpPacket(ipHeader: IPv4Header, vpnOutput: FileOutputStream) {
         val udpHeader = UDPHeader.parse(ipHeader.payload) ?: return
-        if (udpHeader.destinationPort != 53) return
+        if (udpHeader.destinationPort == 53) { forwardDns(ipHeader, udpHeader, vpnOutput); return }
+        val gw = tunnels.firstNotNullOfOrNull { it.udpGw } ?: return
+        val data = udpHeader.payload
+        if (data.isEmpty() || data.size > 1300) return
+        val sender = udpExecutor ?: return
+        val srcIp = ipHeader.sourceIp; val srcPort = udpHeader.sourcePort
+        val dstIp = ipHeader.destinationIp; val dstPort = udpHeader.destinationPort
+        sender.submit {
+            try { gw.sendPacket(srcIp, srcPort, dstIp, dstPort, data) } catch (e: Exception) { Log.e(TAG, "udp send failed", e) }
+        }
+    }
+
+    private fun forwardDns(ipHeader: IPv4Header, udpHeader: UDPHeader, vpnOutput: FileOutputStream) {
         Thread {
             try {
                 val dnsSocket = DatagramSocket()
@@ -626,6 +730,8 @@ class ConnectXVpnService : VpnService() {
         pendingConnections.clear()
         synExecutor.shutdownNow()
         synExecutor = Executors.newFixedThreadPool(16)
+        udpExecutor?.shutdownNow(); udpExecutor = null
+        synchronized(vpnOutLock) { vpnOut = null }
         tcpConnections.values.forEach { it.close() }
         tcpConnections.clear()
         try { vpnInterface?.close() } catch (e: Exception) { Log.e(TAG, "close vpn error", e) }
