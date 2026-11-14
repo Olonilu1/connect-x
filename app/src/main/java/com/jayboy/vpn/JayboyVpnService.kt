@@ -71,6 +71,7 @@ class JayboyVpnService : VpnService() {
     }
 
     private var tunnels: MutableList<Tunnel> = mutableListOf()
+    private var lastFail = ""
     private var vpnInterface: ParcelFileDescriptor? = null
     private var mtu: Int = 1400
 
@@ -165,6 +166,7 @@ class JayboyVpnService : VpnService() {
             true
         } catch (e: Exception) {
             Log.e(TAG, "ssh connect failed through tunnel ${t.port}", e)
+            lastFail = e.message?.let { "ssh: ${it.take(90)}" } ?: "ssh failed"
             t.sshSession = null
             false
         }
@@ -225,9 +227,42 @@ class JayboyVpnService : VpnService() {
             if (pl.isNotEmpty()) {
                 socket.getOutputStream().apply { write(pl.toByteArray(Charsets.ISO_8859_1)); flush() }
             }
+            // Peek the first response bytes: an HTTP answer (e.g. 101 Switching
+            // Protocols) must be drained before the SSH stream starts. Anything
+            // else (the SSH banner itself) is pushed back for jsch.
+            responseStream = null
+            try {
+                socket.soTimeout = 3000
+                val inp = java.io.PushbackInputStream(socket.getInputStream(), 16384)
+                val first = inp.read()
+                if (first >= 0) {
+                    if (first == 'H'.code) {
+                        val sb = StringBuilder("H")
+                        val deadline = System.currentTimeMillis() + 8000
+                        while (true) {
+                            val r = inp.read()
+                            if (r < 0) break
+                            sb.append(r.toChar())
+                            if (sb.endsWith("\r\n\r\n")) break
+                            if (System.currentTimeMillis() > deadline) break
+                        }
+                        responseStream = inp
+                    } else {
+                        inp.unread(first)
+                        responseStream = inp
+                    }
+                } else {
+                    responseStream = inp
+                }
+            } catch (e: Exception) {
+                responseStream = null
+            } finally {
+                try { socket.soTimeout = 0 } catch (e: Exception) {}
+            }
             return socket
         }
-        override fun getInputStream(socket: Socket) = socket.getInputStream()
+        private var responseStream: java.io.PushbackInputStream? = null
+        override fun getInputStream(socket: Socket) = responseStream ?: socket.getInputStream()
         override fun getOutputStream(socket: Socket) = socket.getOutputStream()
     }
 
@@ -257,6 +292,7 @@ class JayboyVpnService : VpnService() {
             return ok
         } catch (e: Exception) {
             Log.e(TAG, "failed to start client ${t.port}", e)
+            lastFail = e.message?.let { "slowdns: ${it.take(90)}" } ?: "slowdns failed"
             return false
         }
     }
@@ -339,7 +375,7 @@ class JayboyVpnService : VpnService() {
             vpnInterface = builder.establish()
             if (vpnInterface == null) {
                 Log.e(TAG, "failed to establish vpn interface")
-                setState("error"); releaseWakeLock()
+                setState("error: vpn permission needed"); releaseWakeLock()
                 stopForeground(STOP_FOREGROUND_REMOVE); stopSelf()
                 return
             }
@@ -360,7 +396,7 @@ class JayboyVpnService : VpnService() {
             }
             if (!startedAny) {
                 Log.e(TAG, "no tunnel started")
-                setState("error")
+                setState("error: ${lastFail.ifEmpty { "no tunnel connected" }}")
                 tunnels.forEach { stopClient(it) }
                 vpnInterface?.close(); vpnInterface = null
                 releaseWakeLock(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf()
@@ -372,7 +408,7 @@ class JayboyVpnService : VpnService() {
             val verified = if (tunnels[0].usesSsh) verifySsh(tunnels[0]) else verifyTunnel(first, 20000)
             if (!verified) {
                 Log.e(TAG, "tunnel verification failed")
-                setState("error")
+                setState("error: ${lastFail.ifEmpty { "tunnel check failed" }}")
                 tunnels.forEach { stopClient(it) }
                 vpnInterface?.close(); vpnInterface = null
                 releaseWakeLock(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf()
@@ -389,7 +425,7 @@ class JayboyVpnService : VpnService() {
             watchdogThread = Thread { runWatchdog() }.also { it.start() }
         } catch (e: Exception) {
             Log.e(TAG, "connect failed", e)
-            setState("error")
+            setState("error: ${e.message?.take(90) ?: "connect failed"}")
             disconnect()
         }
     }

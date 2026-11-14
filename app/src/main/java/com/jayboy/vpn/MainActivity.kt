@@ -57,12 +57,12 @@ class MainActivity : AppCompatActivity() {
 
         JayboyVpnService.stateCallback = { state ->
             runOnUiThread {
-                statusText.text = when (state) {
-                    "connecting" -> "connecting..."
-                    "connected" -> "connected"
-                    "disconnecting" -> "disconnecting..."
-                    "disconnected" -> "disconnected"
-                    "error" -> "error - check your config"
+                statusText.text = when {
+                    state == "connecting" -> "connecting..."
+                    state == "connected" -> "connected"
+                    state == "disconnecting" -> "disconnecting..."
+                    state == "disconnected" -> "disconnected"
+                    state.startsWith("error") -> state
                     else -> state
                 }
                 connectBtn.isEnabled = state != "connected" && state != "connecting"
@@ -281,7 +281,7 @@ class MainActivity : AppCompatActivity() {
             val lock = o.optJSONObject("lockConfig")
             if (lock != null && lock.optBoolean("isLocked", false)) {
                 val exp = lockExpiryMillis(lock)
-                if (exp != null && exp < System.currentTimeMillis()) { skippedExpired++; continue }
+                if (exp != null && exp < System.currentTimeMillis()) skippedExpired++
                 val lockPass = lock.optString("password", "")
                 if (lockPass.isNotEmpty()) {
                     val entered = pendingLockPassword ?: ""
@@ -315,7 +315,7 @@ class MainActivity : AppCompatActivity() {
         }
         saveProfiles(); renderProfiles()
         val msg = StringBuilder("imported $added profiles")
-        if (skippedExpired > 0) msg.append(", $skippedExpired expired")
+        if (skippedExpired > 0) msg.append(", $skippedExpired expired (imported anyway)")
         if (skippedLocked > 0) msg.append(", $skippedLocked wrong password")
         if (skippedOther > 0) msg.append(", $skippedOther unsupported")
         Toast.makeText(this, msg.toString(), Toast.LENGTH_LONG).show()
